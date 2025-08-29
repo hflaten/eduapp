@@ -1,0 +1,13 @@
+[project]
+name = "eduapp-backend"
+version = "0.1.0"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]",
+  "pydantic>=2.7",
+  "SQLAlchemy>=2.0",
+  "psycopg[binary]",
+  "python-jose[cryptography]",
+  "passlib[argon2]",
+  "orjson",
+]

@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "EduApp",
+    "slug": "eduapp",
+    "scheme": "eduapp",
+    "extra": {
+      "apiUrl": "${EXPO_PUBLIC_API_URL}"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}
