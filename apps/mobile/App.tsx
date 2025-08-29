@@ -1,128 +1,213 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { SafeAreaView, View, Text, Button, ActivityIndicator, TextInput } from "react-native";
-import { login, signup, getMe, saveToken, loadToken, clearToken, API_URL, type Me } from "./src/api";
+import {
+  API_URL,
+  type Me,
+  login,
+  signup,
+  getMe,
+  saveToken,
+  loadToken,
+  clearToken,
+  startSession,
+  finishSession,
+  mySessions,
+  saveActiveSession,
+  loadActiveSession,
+  clearActiveSession,
+  type Session,
+} from "./src/api";
+
+const POMO_MINUTES = 25;
+const POMO_MS = POMO_MINUTES * 60 * 1000;
 
 export default function App() {
+  // auth
   const [me, setMe] = useState<Me | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<"login" | "signup" | "none">("none");
 
-  // Sign-up form state
-  const [suEmail, setSuEmail] = useState("");
-  const [suName, setSuName] = useState("");
-  const [suPassword, setSuPassword] = useState("");
+  // login/signup
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
 
-  async function refreshWithStoredToken() {
+  // pomodoro
+  const [active, setActive] = useState<{ id: number; startedAt: Date } | null>(null);
+  const [last, setLast] = useState<Session | null>(null);
+  const [tick, setTick] = useState(0);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // bootstrap
+  useEffect(() => {
+    (async () => {
+      try {
+        const t = await loadToken();
+        if (!t) { setLoading(false); return; }
+        setToken(t);
+        const m = await getMe(t);
+        setMe(m);
+
+        const persisted = await loadActiveSession();
+        if (persisted) {
+          setActive({ id: persisted.id, startedAt: new Date(persisted.started_at) });
+        } else {
+          const arr = await mySessions(t, 1);
+          setLast(arr[0] ?? null);
+        }
+      } catch (e: any) {
+        setError(String(e?.message ?? e));
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  // ticker
+  useEffect(() => {
+    if (!active) { if (intervalRef.current) clearInterval(intervalRef.current); return; }
+    intervalRef.current = setInterval(() => setTick((x) => x + 1), 1000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [active]);
+
+  const msLeft = active ? Math.max(0, POMO_MS - (Date.now() - active.startedAt.getTime())) : 0;
+  const mm = String(Math.floor(msLeft / 60000)).padStart(2, "0");
+  const ss = String(Math.floor((msLeft % 60000) / 1000)).padStart(2, "0");
+
+  // auto-finish
+  useEffect(() => {
+    if (active && msLeft === 0) handleFinish().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick, msLeft, active?.id]);
+
+  async function handleLogin() {
     setError(null);
-    const token = await loadToken();
-    if (!token) { setLoading(false); return; }
     try {
-      const profile = await getMe(token);
-      setMe(profile);
+      const t = await login(email.trim(), password);
+      await saveToken(t);
+      setToken(t);
+      const m = await getMe(t);
+      setMe(m);
+      const arr = await mySessions(t, 1);
+      setLast(arr[0] ?? null);
     } catch (e: any) {
-      setError(e?.message || "Failed to load /me");
-      await clearToken();
-    } finally {
-      setLoading(false);
+      setError(`Login failed: ${String(e?.message ?? e)}`);
     }
   }
 
-  async function quickLogin() {
-    setLoading(true); setError(null);
+  async function handleSignup() {
+    setError(null);
     try {
-      const token = await login("second.user@example.com", "secret123");
-      await saveToken(token);
-      const profile = await getMe(token);
-      setMe(profile);
+      await signup(email.trim(), name || null, password);
+      await handleLogin();
     } catch (e: any) {
-      setError(e?.message || "Login failed");
-    } finally {
-      setLoading(false);
+      setError(`Signup failed: ${String(e?.message ?? e)}`);
     }
   }
 
-  async function doSignup() {
-    setLoading(true); setError(null);
-    try {
-      await signup(suEmail.trim(), suName.trim() || null, suPassword);
-      const token = await login(suEmail.trim(), suPassword); // auto-login
-      await saveToken(token);
-      const profile = await getMe(token);
-      setMe(profile);
-      setMode("none");
-      setSuEmail(""); setSuName(""); setSuPassword("");
-    } catch (e: any) {
-      setError(e?.message || "Signup failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function logout() {
-    setLoading(true);
+  async function handleLogout() {
     await clearToken();
-    setMe(null);
-    setLoading(false);
+    await clearActiveSession();
+    setMe(null); setToken(null); setActive(null); setLast(null);
   }
 
-  useEffect(() => { refreshWithStoredToken(); }, []);
+  async function handleStart() {
+    if (!token) return;
+    setError(null);
+    try {
+      const s = await startSession(token, true, null);
+      const startedAt = new Date(s.started_at);
+      setActive({ id: s.id, startedAt });
+      await saveActiveSession({ id: s.id, started_at: s.started_at });
+    } catch (e: any) {
+      setError(`Start failed: ${String(e?.message ?? e)}`);
+    }
+  }
+
+  async function handleFinish() {
+    if (!token || !active) return;
+    try {
+      const s = await finishSession(token, active.id);
+      setActive(null);
+      await clearActiveSession();
+      setLast(s);
+    } catch (e: any) {
+      setError(`Finish failed: ${String(e?.message ?? e)}`);
+    }
+  }
+
+  if (loading) {
+    return (
+      <SafeAreaView style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator />
+        <Text>Connecting to {API_URL}</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (!me || !token) {
+    return (
+      <SafeAreaView style={{ flex: 1, padding: 24, gap: 16 }}>
+        <Text style={{ fontSize: 32, fontWeight: "700" }}>{mode === "login" ? "Welcome back" : "Create account"}</Text>
+        <TextInput style={boxStyle} placeholder="you@example.com" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail}/>
+        {mode === "signup" && (
+          <TextInput style={boxStyle} placeholder="Your name" autoCapitalize="words" value={name} onChangeText={setName}/>
+        )}
+        <TextInput style={boxStyle} placeholder="Password" secureTextEntry value={password} onChangeText={setPassword}/>
+        <Button title={mode === "login" ? "Log in" : "Create account"} onPress={mode === "login" ? handleLogin : handleSignup}/>
+        <Button title={mode === "login" ? "Need an account? Sign up" : "Have an account? Log in"} onPress={() => setMode(mode === "login" ? "signup" : "login")} />
+        {!!error && <Text style={{ color: "crimson" }}>{error}</Text>}
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <SafeAreaView style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <View style={{ gap: 12, alignItems: "center", maxWidth: 500, width: "100%" }}>
-        <Text style={{ fontSize: 24, fontWeight: "700" }}>EduApp mobile ✅</Text>
-        <Text style={{ opacity: 0.7, fontSize: 12 }}>API: {API_URL || "(unset)"}</Text>
+    <SafeAreaView style={{ flex: 1, padding: 24, gap: 16 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+        <Text style={{ fontSize: 28, fontWeight: "700" }}>Hi, {me.name ?? me.email.split("@")[0]}</Text>
+        <Button title="Log out" onPress={handleLogout} />
+      </View>
 
-        {loading && <ActivityIndicator />}
+      <View style={{ alignItems: "center", marginTop: 24 }}>
+        <Text style={{ fontSize: 36, fontWeight: "700", marginBottom: 16 }}>
+          {active ? "Stay focused" : "Ready to focus?"}
+        </Text>
 
-        {!loading && !me && mode === "none" && (
+        {!active ? (
+          <Button title="Start Pomodoro (25:00)" onPress={handleStart} />
+        ) : (
           <>
-            <Text>Not logged in.</Text>
-            <Button title="Quick login (test user)" onPress={quickLogin} />
-            <Button title="Create new account" onPress={() => setMode("signup")} />
+            <Text style={{ fontSize: 64, fontVariant: ["tabular-nums"], marginVertical: 16 }}>
+              {mm}:{ss}
+            </Text>
+            <Button title="Finish early" onPress={handleFinish} />
+            <Text style={{ marginTop: 8, color: "#666" }}>Auto-finishes at 00:00</Text>
           </>
         )}
+        {!!error && <Text style={{ marginTop: 8, color: "crimson" }}>{error}</Text>}
+      </View>
 
-        {!loading && !me && mode === "signup" && (
-          <View style={{ width: "100%", gap: 8 }}>
-            <Text style={{ fontWeight: "600", fontSize: 16, textAlign: "center" }}>Sign Up</Text>
-            <TextInput
-              placeholder="Email"
-              autoCapitalize="none"
-              keyboardType="email-address"
-              value={suEmail}
-              onChangeText={setSuEmail}
-              style={{ borderWidth: 1, padding: 8, borderRadius: 8 }}
-            />
-            <TextInput
-              placeholder="Name (optional)"
-              value={suName}
-              onChangeText={setSuName}
-              style={{ borderWidth: 1, padding: 8, borderRadius: 8 }}
-            />
-            <TextInput
-              placeholder="Password"
-              secureTextEntry
-              value={suPassword}
-              onChangeText={setSuPassword}
-              style={{ borderWidth: 1, padding: 8, borderRadius: 8 }}
-            />
-            <Button title="Create account" onPress={doSignup} />
-            <Button title="Cancel" onPress={() => setMode("none")} />
-          </View>
-        )}
-
-        {!loading && me && (
+      <View style={{ marginTop: 24, padding: 16, borderWidth: 2, borderRadius: 12 }}>
+        <Text style={{ fontWeight: "700", fontSize: 18, marginBottom: 8 }}>Last session</Text>
+        {last ? (
           <>
-            <Text>Logged in as: {me.email}</Text>
-            <Text style={{ opacity: 0.7 }}>{me.name ?? "No name set"}</Text>
-            <Button title="Log out" onPress={logout} />
+            <Text>ID: {last.id}</Text>
+            <Text>Duration: {last.duration_sec ?? 0}s</Text>
+            <Text>Ended: {last.ended_at ?? "—"}</Text>
           </>
+        ) : (
+          <Text>No sessions yet</Text>
         )}
-
-        {error && <Text style={{ marginTop: 8, color: "crimson", textAlign: "center" }}>{error}</Text>}
       </View>
     </SafeAreaView>
   );
 }
+
+const boxStyle = {
+  padding: 14,
+  borderWidth: 2,
+  borderRadius: 12,
+  backgroundColor: "#f6ffc2",
+} as const;

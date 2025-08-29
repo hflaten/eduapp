@@ -91,3 +91,159 @@ def get_current_user(
 @app.get("/me")
 def me(current_user: models.User = Depends(get_current_user)):
     return {"id": current_user.id, "email": current_user.email, "name": current_user.name}
+from .ai.router import router as ai_router
+app.include_router(ai_router, prefix='/ai')
+
+# ---------------- Study Sessions ----------------
+from datetime import datetime, timezone
+from pydantic import BaseModel
+from .models import StudySession
+from fastapi import status
+
+class SessionStartReq(BaseModel):
+    is_pomodoro: bool = False
+    note: str | None = None
+
+class SessionFinishReq(BaseModel):
+    session_id: int
+
+class SessionOut(BaseModel):
+    id: int
+    started_at: datetime
+    ended_at: datetime | None
+    duration_sec: int | None
+    is_pomodoro: bool
+    note: str | None
+
+@app.post("/sessions/start", response_model=SessionOut, status_code=status.HTTP_201_CREATED)
+def start_session(req: SessionStartReq, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
+    s = StudySession(user_id=user.id, is_pomodoro=req.is_pomodoro, note=req.note)
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return SessionOut(
+        id=s.id,
+        started_at=s.started_at,
+        ended_at=s.ended_at,
+        duration_sec=s.duration_sec,
+        is_pomodoro=s.is_pomodoro,
+        note=s.note,
+    )
+
+@app.post("/sessions/finish", response_model=SessionOut)
+def finish_session(req: SessionFinishReq, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
+    s = db.query(StudySession).filter_by(id=req.session_id, user_id=user.id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if s.ended_at is None:
+        s.ended_at = datetime.now(timezone.utc)
+        if s.started_at:
+            s.duration_sec = int((s.ended_at - s.started_at).total_seconds())
+    db.commit()
+    db.refresh(s)
+    return SessionOut(
+        id=s.id,
+        started_at=s.started_at,
+        ended_at=s.ended_at,
+        duration_sec=s.duration_sec,
+        is_pomodoro=s.is_pomodoro,
+        note=s.note,
+    )
+
+@app.get("/sessions/my", response_model=list[SessionOut])
+def my_sessions(limit: int = 20, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
+    rows = (
+        db.query(StudySession)
+        .filter_by(user_id=user.id)
+        .order_by(StudySession.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        SessionOut(
+            id=r.id,
+            started_at=r.started_at,
+            ended_at=r.ended_at,
+            duration_sec=r.duration_sec,
+            is_pomodoro=r.is_pomodoro,
+            note=r.note,
+        )
+        for r in rows
+    ]
+
+# ---------------- Study Sessions ----------------
+from datetime import datetime, timezone
+from pydantic import BaseModel
+from .models import StudySession
+from fastapi import status
+
+class SessionStartReq(BaseModel):
+    is_pomodoro: bool = False
+    note: str | None = None
+
+class SessionFinishReq(BaseModel):
+    session_id: int
+
+class SessionOut(BaseModel):
+    id: int
+    started_at: datetime
+    ended_at: datetime | None
+    duration_sec: int | None
+    is_pomodoro: bool
+    note: str | None
+
+@app.post("/sessions/start", response_model=SessionOut, status_code=status.HTTP_201_CREATED)
+def start_session(req: SessionStartReq, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
+    s = StudySession(user_id=user.id, is_pomodoro=req.is_pomodoro, note=req.note)
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return SessionOut(
+        id=s.id,
+        started_at=s.started_at,
+        ended_at=s.ended_at,
+        duration_sec=s.duration_sec,
+        is_pomodoro=s.is_pomodoro,
+        note=s.note,
+    )
+
+@app.post("/sessions/finish", response_model=SessionOut)
+def finish_session(req: SessionFinishReq, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
+    s = db.query(StudySession).filter_by(id=req.session_id, user_id=user.id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if s.ended_at is None:
+        s.ended_at = datetime.now(timezone.utc)
+        if s.started_at:
+            s.duration_sec = int((s.ended_at - s.started_at).total_seconds())
+    db.commit()
+    db.refresh(s)
+    return SessionOut(
+        id=s.id,
+        started_at=s.started_at,
+        ended_at=s.ended_at,
+        duration_sec=s.duration_sec,
+        is_pomodoro=s.is_pomodoro,
+        note=s.note,
+    )
+
+@app.get("/sessions/my", response_model=list[SessionOut])
+def my_sessions(limit: int = 20, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
+    rows = (
+        db.query(StudySession)
+        .filter_by(user_id=user.id)
+        .order_by(StudySession.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        SessionOut(
+            id=r.id,
+            started_at=r.started_at,
+            ended_at=r.ended_at,
+            duration_sec=r.duration_sec,
+            is_pomodoro=r.is_pomodoro,
+            note=r.note,
+        )
+        for r in rows
+    ]
