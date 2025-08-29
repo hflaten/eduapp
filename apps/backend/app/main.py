@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+import os
 from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -11,10 +14,17 @@ from .jwt import create_access_token, decode_access_token
 
 app = FastAPI(title="EduApp API", version="0.1")
 
-# Dev CORS; tighten in production
+# ---- CORS: allow only our front-end origin(s) ----
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "").rstrip("/")
+ALLOWED_ORIGINS = [o for o in {
+    FRONTEND_ORIGIN,
+    "http://localhost:8083",   # Expo web (dev)
+    "http://localhost:3000",   # common local web
+} if o]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,7 +71,6 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     token = create_access_token(sub=str(user.id), expires_minutes=60)
     return {"access_token": token, "token_type": "bearer"}
 
-# ---- Auth dependency (reads Authorization: Bearer <token>) ----
 def get_current_user(
     db: Session = Depends(get_db),
     authorization: str | None = Header(default=None, alias="Authorization"),
@@ -79,7 +88,6 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
-# ---- Protected route ----
 @app.get("/me")
 def me(current_user: models.User = Depends(get_current_user)):
     return {"id": current_user.id, "email": current_user.email, "name": current_user.name}
