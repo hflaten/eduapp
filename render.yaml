@@ -3,19 +3,21 @@ services:
     name: eduapp-backend
     env: python
     rootDir: apps/backend
-    buildCommand: pip install -r requirements.txt || pip install -r pyproject.toml || true
+    buildCommand: pip install -r requirements.txt
     startCommand: ./start.sh
+    autoDeploy: true
     envVars:
       - key: DATABASE_URL
         fromDatabase:
           name: eduapp-db
           property: connectionString
+      - key: PYTHON_VERSION
+        value: 3.12.1
       - key: JWT_SECRET
         generateValue: true
       - key: FRONTEND_ORIGIN
-        value: https://<din-vercel-app>.vercel.app  # oppdater etter Vercel-deploy
-    autoDeploy: true
+        value: "*"   # tighten to your Vercel domain later
+
 databases:
   - name: eduapp-db
-    databaseName: eduapp
-    user: edu
+    plan: basic-256mb
