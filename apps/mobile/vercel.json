@@ -1,9 +1,5 @@
 {
-  "version": 2,
-  "builds": [
-    { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
-  ],
-  "env": {
-    "EXPO_PUBLIC_API_URL": "https://eduapp-backend-83ot.onrender.com"
-  }
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://eduapp-backend-83ot.onrender.com/$1" }
+  ]
 }
