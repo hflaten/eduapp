@@ -6,3 +6,5 @@ psycopg[binary]
 passlib[argon2]
 python-jose[cryptography]
 pydantic[email]
+
+psycopg2-binary==2.9.9
