@@ -247,3 +247,18 @@ def my_sessions(limit: int = 20, db: Session = Depends(get_db), user: models.Use
         )
         for r in rows
     ]
+# --- Extra CORS for dynamic Expo web (matches https://<codespace>-<port>.app.github.dev) ---
+import os as _os
+from fastapi.middleware.cors import CORSMiddleware as _CORS  # already imported above; safe if repeated
+
+app.add_middleware(
+    _CORS,
+    allow_origin_regex=_os.getenv(
+        "ALLOW_ORIGIN_REGEX",
+        r"^https://[a-z0-9-]+-\d+\.app\.github\.dev$"
+    ),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+# --- end extra CORS ---
