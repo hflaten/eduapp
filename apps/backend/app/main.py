@@ -22,13 +22,22 @@ ALLOWED_ORIGINS = [o for o in {
     "http://localhost:3000",   # common local web
 } if o]
 
+# ---- CORS (explicit, no wildcards) ----
+_frontend = os.getenv("FRONTEND_ORIGIN", "").strip().rstrip("/")
+_allowed_origins = [_frontend] if _frontend else []
+# Always include Vercel domain used for prod (helpful if FRONTEND_ORIGIN missing/mismatched)
+if "https://eduapp-web.vercel.app" not in _allowed_origins:
+    _allowed_origins.append("https://eduapp-web.vercel.app")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=[o for o in _allowed_origins if o],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["Content-Type"],
 )
+# ---------------------------------------
 
 @app.get("/health")
 def health():
