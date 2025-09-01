@@ -271,3 +271,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 # --- end extra CORS ---
+
+# --- CORS preflight fallback (so OPTIONS never 400s) ---
+from starlette.responses import Response
+
+@app.options("/{rest_of_path:path}")
+def cors_preflight(rest_of_path: str):
+    # Starlette's CORSMiddleware will add the correct headers.
+    return Response(status_code=204)
+# --- end fallback ---
