@@ -6,17 +6,18 @@
     "start": "expo start",
     "web:build": "npx expo export --platform web -o dist",
     "build": "expo export --platform web",
-    "dev:web": "expo start --web"
+    "dev:web": "expo start --web",
+    "vercel-build": "expo export --platform web"
   },
   "dependencies": {
-    "expo": "~51.0.0",
-    "react": "18.2.0",
-    "react-native": "0.74.0",
-    "expo-secure-store": "~13.0.2",
-    "react-native-web": "~0.19.10",
-    "react-dom": "18.2.0",
     "@expo/metro-runtime": "~3.2.3",
-    "typescript": "~5.3.3",
-    "@types/react": "~18.2.79"
+    "@types/react": "~18.2.79",
+    "expo": "~51.0.0",
+    "expo-secure-store": "~13.0.2",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "react-native": "0.74.0",
+    "react-native-web": "~0.19.10",
+    "typescript": "~5.3.3"
   }
 }
