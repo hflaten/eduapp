@@ -1,140 +1,99 @@
-/* Web-safe API client & token helpers */
+const RAW_API =
+  (typeof process !== "undefined" && (process as any).env?.EXPO_PUBLIC_API_URL) ||
+  (typeof window !== "undefined" && (window as any).EXPO_PUBLIC_API_URL) ||
+  "/api";
 
-type Json = Record<string, any>;
+const API = RAW_API.replace(/\/$/, ""); // no trailing slash
 
-const DEFAULT_API = "https://eduapp-backend-83ot.onrender.com";
-const API_BASE: string =
-  (typeof process !== "undefined" &&
-    (process.env as any)?.EXPO_PUBLIC_API_URL) ||
-  (typeof (globalThis as any).EXPO_PUBLIC_API_URL === "string"
-    ? (globalThis as any).EXPO_PUBLIC_API_URL
-    : DEFAULT_API);
-
-const TOKEN_KEY = "access_token";
-
-/** Save JWT token (web = localStorage; native = AsyncStorage if present) */
-export async function saveToken(token: string): Promise<void> {
-  if (typeof window !== "undefined" && window.localStorage) {
-    window.localStorage.setItem(TOKEN_KEY, token);
-    return;
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const AsyncStorage = require("@react-native-async-storage/async-storage")
-      .default;
-    await AsyncStorage.setItem(TOKEN_KEY, token);
-  } catch {
-    /* ignore if not available */
-  }
-}
-
-/** Load JWT token */
-export async function loadToken(): Promise<string | null> {
-  if (typeof window !== "undefined" && window.localStorage) {
-    return window.localStorage.getItem(TOKEN_KEY);
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const AsyncStorage = require("@react-native-async-storage/async-storage")
-      .default;
-    return await AsyncStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-/** Clear JWT token */
-export async function clearToken(): Promise<void> {
-  if (typeof window !== "undefined" && window.localStorage) {
-    window.localStorage.removeItem(TOKEN_KEY);
-    return;
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const AsyncStorage = require("@react-native-async-storage/async-storage")
-      .default;
-    await AsyncStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
-async function http<T = any>(
-  path: string,
-  opts: RequestInit = {},
-  auth = false
-): Promise<T> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(opts.headers as Record<string, string> | undefined),
-  };
-
-  if (auth) {
-    const t = await loadToken();
-    if (t) headers.Authorization = `Bearer ${t}`;
-  }
-
-  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
-  const text = await res.text();
-  const data = text ? (JSON.parse(text) as T) : ({} as T);
-
+async function asJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    const msg =
-      (data as any)?.detail ||
-      (data as any)?.message ||
-      `${res.status} ${res.statusText}`;
-    throw new Error(msg);
+    const text = await res.text().catch(() => "");
+    throw new Error(`${res.status}: ${text || res.statusText}`);
   }
-  return data;
+  return res.json() as Promise<T>;
 }
 
-/* ---------- Auth ---------- */
-export async function signup(payload: {
-  email: string;
-  name: string;
-  password: string;
-}) {
-  return http<Json>("/auth/signup", {
+// ---- token helpers (web) ----
+export function saveToken(token: string) {
+  if (typeof localStorage !== "undefined") localStorage.setItem("token", token);
+}
+export function loadToken(): string | null {
+  return typeof localStorage !== "undefined" ? localStorage.getItem("token") : null;
+}
+export function clearToken() {
+  if (typeof localStorage !== "undefined") localStorage.removeItem("token");
+}
+
+// ---- auth ----
+export async function login(email: string, password: string) {
+  const res = await fetch(`${API}/auth/login`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
   });
+  return asJson<{ access_token: string; token_type: string }>(res);
 }
-
-export async function login(payload: { email: string; password: string }) {
-  // Returns { access_token, token_type }
-  return http<Json>("/auth/login", {
+export async function signup(email: string, name: string, password: string) {
+  const res = await fetch(`${API}/auth/signup`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, name, password }),
   });
+  return asJson<{ id: number; email: string; name: string }>(res);
+}
+export async function getMe(token: string) {
+  const res = await fetch(`${API}/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return asJson<{ id: number; email: string; name: string }>(res);
 }
 
-export async function me() {
-  return http<Json>("/me", { method: "GET" }, true);
+// ---- sessions ----
+export async function startSession(
+  token: string,
+  isPomodoro = true,
+  note?: string | null
+) {
+  const res = await fetch(`${API}/sessions/start`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ is_pomodoro: isPomodoro, note: note ?? null }),
+  });
+  return asJson<{ id: number; started_at: string; is_pomodoro: boolean; note: string | null }>(res);
 }
 
-/* ---------- Sessions ---------- */
-export async function startSession(payload: {
-  is_pomodoro?: boolean;
-  note?: string | null;
-}) {
-  return http<Json>(
-    "/sessions/start",
-    { method: "POST", body: JSON.stringify(payload ?? {}) },
-    true
-  );
+export async function finishSession(token: string, session_id: number) {
+  const res = await fetch(`${API}/sessions/finish`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ session_id }),
+  });
+  return asJson<{ id: number; ended_at: string; duration_sec: number | null }>(res);
 }
 
-export async function finishSession(payload: { session_id: number }) {
-  return http<Json>(
-    "/sessions/finish",
-    { method: "POST", body: JSON.stringify(payload) },
-    true
-  );
+export async function mySessions(token: string, limit = 5) {
+  const res = await fetch(`${API}/sessions/my?limit=${limit}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return asJson<any[]>(res);
 }
 
-export async function mySessions(limit = 5) {
-  return http<Json>(`/sessions/my?limit=${limit}`, { method: "GET" }, true);
-}
-
-/* Convenience re-exports */
-export const API_URL = API_BASE;
+// Provide BOTH named and default exports so existing imports keep working
+const api = {
+  saveToken,
+  loadToken,
+  clearToken,
+  login,
+  signup,
+  getMe,
+  startSession,
+  finishSession,
+  mySessions,
+};
+export default api;
