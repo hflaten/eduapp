@@ -280,3 +280,6 @@ def cors_preflight(rest_of_path: str):
     # Starlette's CORSMiddleware will add the correct headers.
     return Response(status_code=204)
 # --- end fallback ---
+
+from app.cors_extra import install_cors as _install_cors
+_install_cors(app)
