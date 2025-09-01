@@ -1,105 +1,140 @@
-import * as SecureStore from "expo-secure-store";
+/* Web-safe API client & token helpers */
 
-/** Backend base URL (must be set at build time on Vercel). */
-export const API_URL = process.env.EXPO_PUBLIC_API_URL as string;
-if (!API_URL) {
-  throw new Error("EXPO_PUBLIC_API_URL is missing at build time");
-}
+type Json = Record<string, any>;
 
-export type Me = { id: number; email: string; name: string | null };
+const DEFAULT_API = "https://eduapp-backend-83ot.onrender.com";
+const API_BASE: string =
+  (typeof process !== "undefined" &&
+    (process.env as any)?.EXPO_PUBLIC_API_URL) ||
+  (typeof (globalThis as any).EXPO_PUBLIC_API_URL === "string"
+    ? (globalThis as any).EXPO_PUBLIC_API_URL
+    : DEFAULT_API);
 
-export async function login(email: string, password: string): Promise<string> {
-  const res = await fetch(`${API_URL}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Login failed (${res.status}): ${text}`);
+const TOKEN_KEY = "access_token";
+
+/** Save JWT token (web = localStorage; native = AsyncStorage if present) */
+export async function saveToken(token: string): Promise<void> {
+  if (typeof window !== "undefined" && window.localStorage) {
+    window.localStorage.setItem(TOKEN_KEY, token);
+    return;
   }
-  const json = await res.json();
-  const token = json?.access_token as string | undefined;
-  if (!token) throw new Error("No access_token in response");
-  return token;
-}
-
-export async function signup(email: string, name: string | null, password: string): Promise<void> {
-  const res = await fetch(`${API_URL}/auth/signup`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, name, password }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Signup failed (${res.status}): ${text}`);
-  }
-}
-
-export async function getMe(token: string): Promise<Me> {
-  const res = await fetch(`${API_URL}/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`GET /me failed (${res.status}): ${text}`);
-  }
-  return (await res.json()) as Me;
-}
-
-/* Token storage with web fallback */
-const KEY = "auth_token";
-const isWeb = typeof window !== "undefined" && typeof window.localStorage !== "undefined";
-
-export async function saveToken(token: string) {
-  if (isWeb) { window.localStorage.setItem(KEY, token); return; }
-  await SecureStore.setItemAsync(KEY, token);
-}
-
-export async function loadToken(): Promise<string | null> {
-  if (isWeb) return window.localStorage.getItem(KEY);
-  try { return await SecureStore.getItemAsync(KEY); } catch { return null; }
-}
-
-export async function clearToken() {
-  if (isWeb) { window.localStorage.removeItem(KEY); return; }
-  await SecureStore.deleteItemAsync(KEY);
-}
-
-// --- injected: session helpers (web) ---
-const API_BASE =
-  (typeof process !== 'undefined' && (process.env?.EXPO_PUBLIC_API_URL as string | undefined)) ||
-  '/api';
-
-function authHeaders(): Record<string, string> {
   try {
-    const t =
-      (typeof window !== 'undefined' &&
-        (localStorage.getItem('access_token') || localStorage.getItem('token'))) ||
-      '';
-    return t ? { Authorization: `Bearer ${t}` } : {};
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const AsyncStorage = require("@react-native-async-storage/async-storage")
+      .default;
+    await AsyncStorage.setItem(TOKEN_KEY, token);
   } catch {
-    return {};
+    /* ignore if not available */
   }
 }
 
-export async function startSession(is_pomodoro: boolean = true, note: string | null = null) {
-  const res = await fetch(`${API_BASE}/sessions/start`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ is_pomodoro, note }),
-  });
-  if (!res.ok) throw new Error(`startSession failed: ${res.status}`);
-  return res.json();
+/** Load JWT token */
+export async function loadToken(): Promise<string | null> {
+  if (typeof window !== "undefined" && window.localStorage) {
+    return window.localStorage.getItem(TOKEN_KEY);
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const AsyncStorage = require("@react-native-async-storage/async-storage")
+      .default;
+    return await AsyncStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
 }
 
-export async function finishSession(session_id: number) {
-  const res = await fetch(`${API_BASE}/sessions/finish`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ session_id }),
-  });
-  if (!res.ok) throw new Error(`finishSession failed: ${res.status}`);
-  return res.json();
+/** Clear JWT token */
+export async function clearToken(): Promise<void> {
+  if (typeof window !== "undefined" && window.localStorage) {
+    window.localStorage.removeItem(TOKEN_KEY);
+    return;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const AsyncStorage = require("@react-native-async-storage/async-storage")
+      .default;
+    await AsyncStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
 }
-// --- end injected ---
+
+async function http<T = any>(
+  path: string,
+  opts: RequestInit = {},
+  auth = false
+): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(opts.headers as Record<string, string> | undefined),
+  };
+
+  if (auth) {
+    const t = await loadToken();
+    if (t) headers.Authorization = `Bearer ${t}`;
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+  const text = await res.text();
+  const data = text ? (JSON.parse(text) as T) : ({} as T);
+
+  if (!res.ok) {
+    const msg =
+      (data as any)?.detail ||
+      (data as any)?.message ||
+      `${res.status} ${res.statusText}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
+/* ---------- Auth ---------- */
+export async function signup(payload: {
+  email: string;
+  name: string;
+  password: string;
+}) {
+  return http<Json>("/auth/signup", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function login(payload: { email: string; password: string }) {
+  // Returns { access_token, token_type }
+  return http<Json>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function me() {
+  return http<Json>("/me", { method: "GET" }, true);
+}
+
+/* ---------- Sessions ---------- */
+export async function startSession(payload: {
+  is_pomodoro?: boolean;
+  note?: string | null;
+}) {
+  return http<Json>(
+    "/sessions/start",
+    { method: "POST", body: JSON.stringify(payload ?? {}) },
+    true
+  );
+}
+
+export async function finishSession(payload: { session_id: number }) {
+  return http<Json>(
+    "/sessions/finish",
+    { method: "POST", body: JSON.stringify(payload) },
+    true
+  );
+}
+
+export async function mySessions(limit = 5) {
+  return http<Json>(`/sessions/my?limit=${limit}`, { method: "GET" }, true);
+}
+
+/* Convenience re-exports */
+export const API_URL = API_BASE;
