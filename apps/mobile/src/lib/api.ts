@@ -1,80 +1,50 @@
-const API = (typeof process !== "undefined" && (process as any).env?.EXPO_PUBLIC_API_URL)
-  || (globalThis as any).EXPO_PUBLIC_API_URL
-  || "";
+const API_BASE =
+  (typeof process !== "undefined" && (process as any).env?.EXPO_PUBLIC_API_URL) ||
+  (globalThis as any).EXPO_PUBLIC_API_URL ||
+  "";
 
-if (!API) console.warn("EXPO_PUBLIC_API_URL is empty; set it on Vercel to the Render URL.");
-
-async function request(path: string, init: RequestInit = {}) {
-  const res = await fetch(`${API}${path}`, {
-    credentials: "include",
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init.headers || {}),
-    },
-  });
-
-  if (!res.ok) {
-    // Make error messages readable, not “[object Object]”
-    let msg = `${res.status}`;
-    try {
-      const j = await res.json();
-      msg += " " + (j?.detail ?? JSON.stringify(j));
-    } catch {
-      try { msg += " " + (await res.text()); } catch {}
-    }
-    throw new Error(msg);
-  }
-  return res.json();
-}
-
-/** --------- Auth --------- */
-export async function login(email: string, password: string):
-  Promise<{ access_token: string; token_type: string; }> {
-  return request("/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ email, password }),
-  });
-}
+const TOKEN_KEY = "token";
 
 export function saveToken(t: string) {
-  try { localStorage.setItem("jwt", t); } catch {}
+  try { localStorage.setItem(TOKEN_KEY, t); } catch {}
 }
 export function getToken(): string | null {
-  try { return localStorage.getItem("jwt"); } catch { return null; }
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 export function clearToken() {
-  try { localStorage.removeItem("jwt"); } catch {}
+  try { localStorage.removeItem(TOKEN_KEY); } catch {}
 }
 
-/** --------- Me --------- */
+function authHeader() {
+  const raw = getToken() || "";
+  const val = raw.startsWith("Bearer ") ? raw : (raw ? `Bearer ${raw}` : "");
+  return val ? { Authorization: val } : {};
+}
+
+export async function login(email: string, password: string) {
+  const r = await fetch(`${API_BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!r.ok) throw await r.json().catch(() => ({ status: r.status }));
+  const data = await r.json();
+  if (data?.access_token) saveToken(data.access_token);
+  return data;
+}
+
 export async function me() {
-  const token = getToken();
-  return request("/me", {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
+  const r = await fetch(`${API_BASE}/me`, { headers: { ...authHeader() } });
+  if (!r.ok) throw await r.json().catch(() => ({ status: r.status }));
+  return r.json();
 }
 
-/** --------- Sessions --------- */
-export async function startSession(is_pomodoro: boolean, note?: string | null) {
-  const token = getToken();
-  return request("/sessions/start", {
+export async function startSession(isPomodoro = true, note = "") {
+  const r = await fetch(`${API_BASE}/sessions/start`, {
     method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    body: JSON.stringify({ is_pomodoro, note: note ?? null }),
+    headers: { "Content-Type": "application/json", ...authHeader() },
+    body: JSON.stringify({ is_pomodoro: isPomodoro, note }),
   });
-}
-export async function finishSession(session_id: number) {
-  const token = getToken();
-  return request("/sessions/finish", {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    body: JSON.stringify({ session_id }),
-  });
-}
-export async function mySessions(limit = 5) {
-  const token = getToken();
-  return request(`/sessions/my?limit=${limit}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
+  if (!r.ok) throw await r.json().catch(() => ({ status: r.status }));
+  return r.json();
 }
