@@ -5,7 +5,7 @@
   "scripts": {
     "start": "expo start",
     "web:build": "npx expo export --platform web -o dist",
-    "build": "expo export --platform web",
+    "build": "expo export --platform web --output-dir dist",
     "dev:web": "expo start --web",
     "vercel-build": "expo export --platform web"
   },
